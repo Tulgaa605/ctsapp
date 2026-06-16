@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
     StyleSheet, Text, View, TouchableOpacity,
-    ScrollView, Alert, ActivityIndicator, Vibration, Button
+    ScrollView, Alert, ActivityIndicator, Vibration, Button, Platform
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -152,7 +152,7 @@ export default function MainScreen({ selectedDate }) {
         // lock & vibrate
         scanLocked.current = true;
         setScanned(true);
-        Vibration.vibrate();
+        if (Platform.OS !== 'web') Vibration.vibrate();
 
         try {
             const parts = (data || '').split('^?');
