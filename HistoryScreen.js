@@ -4,12 +4,13 @@ import {
     SafeAreaView, TouchableOpacity,
     Alert, ActivityIndicator, TextInput, Animated, Platform
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Device from 'expo-device';
+import { loadHistory, deleteHistoryItems, deleteAllHistory } from './lib/historyStorage';
+import { CTS_ASSET_TAG } from './lib/ctsystemApi';
 
 export default function HistoryScreen({ selectedDate, setTotalCount }) {
     const [history, setHistory] = useState([]);
@@ -24,12 +25,8 @@ export default function HistoryScreen({ selectedDate, setTotalCount }) {
     const isSelectionMode = selectedItems.size > 0;
 
     const fetchHistory = useCallback(async () => {
-        const stored = await AsyncStorage.getItem('history');
-        const parsed = stored ? JSON.parse(stored) : [];
-        setHistory(parsed.map(item => ({
-            ...item,
-            id: `${item.assetCode}-${item.serialNumber}-${item.createdAt}`
-        })));
+        const parsed = await loadHistory();
+        setHistory(parsed);
     }, []);
 
     useFocusEffect(useCallback(() => {
@@ -102,8 +99,7 @@ export default function HistoryScreen({ selectedDate, setTotalCount }) {
                 {
                     text: "Устгах", style: "destructive",
                     onPress: async () => {
-                        const newHistory = history.filter(item => !selectedItems.has(item.id));
-                        await AsyncStorage.setItem('history', JSON.stringify(newHistory));
+                        const newHistory = await deleteHistoryItems([...selectedItems]);
                         setHistory(newHistory);
                         setSelectedItems(new Set());
                     }
@@ -121,7 +117,7 @@ export default function HistoryScreen({ selectedDate, setTotalCount }) {
                 {
                     text: "Бүгдийг устгах", style: "destructive",
                     onPress: async () => {
-                        await AsyncStorage.removeItem('history');
+                        await deleteAllHistory();
                         setHistory([]);
                         setSelectedItems(new Set());
                         Alert.alert("Амжилттай", "Бүх түүхийг устгалаа.");
@@ -200,7 +196,7 @@ export default function HistoryScreen({ selectedDate, setTotalCount }) {
     const buildPayload = () => {
         const year = selectedDate.getFullYear();
         const month = selectedDate.getMonth() + 1;
-        const key = "CT$FS4";
+        const key = CTS_ASSET_TAG;
         const deviceID = Device.osInternalBuildId || "UNKNOWN";
 
         // orgCode — тухайн сард уншсан бичлэгүүд бүгд ижил байгууллага гэж үзнэ

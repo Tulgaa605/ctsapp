@@ -5,10 +5,11 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Device from 'expo-device';
 import { useIsFocused } from '@react-navigation/native';
 import { useNetInfo } from '@react-native-community/netinfo';
+import { loadHistory, saveHistoryItem } from './lib/historyStorage';
+import { fetchAssetDetails, sendAssetItem, isDeviceOnline } from './lib/ctsystemApi';
 
 const ALERT_COOLDOWN_MS = 1200;
 const RESCAN_DELAY_MS = 1000; // давхар уншилтыг багасгахад тусална
@@ -22,6 +23,7 @@ export default function MainScreen({ selectedDate }) {
     const alertStampRef = useRef(0);
     const isFocused = useIsFocused();
     const { isConnected } = useNetInfo();
+    const isOnline = isDeviceOnline(isConnected);
 
     const [precheck, setPrecheck] = useState({ level: 'idle', messages: [] }); // 'idle' | 'ok' | 'warn' | 'error'
 
@@ -73,17 +75,7 @@ export default function MainScreen({ selectedDate }) {
         return t;
     };
 
-    const loadNormalizedHistory = async () => {
-        const existing = await AsyncStorage.getItem('history') || '[]';
-        const arr = JSON.parse(existing);
-        return arr.map(it => {
-            if (!it.orgCode) {
-                const rawParts = (it.raw || '').split('^?');
-                return { ...it, orgCode: rawParts[5] || '' }; // QR-ийн 6 дахь талбар
-            }
-            return it;
-        });
-    };
+    const loadNormalizedHistory = async () => loadHistory();
 
     // ---- Зөвхөн НЭГ алдаа буцаадаг урьдчилсан шалгалт ----
     const runPrecheck = (parsed, selectedDate, history, isConnected) => {
@@ -131,11 +123,11 @@ export default function MainScreen({ selectedDate }) {
         const messages = [];
         let level = 'ok';
 
-        if (parsed.assetName === '[интернет шаардлагатай]' || parsed.assetName === '[оффлайн хадгалсан]') {
+        if (parsed.assetName === '[интернет шаардлагатай]' || parsed.assetName === '[дэлгэрэнгүй олдсонгүй]' || parsed.assetName === '[оффлайн хадгалсан]') {
             level = 'warn';
-            messages.push('Дэлгэрэнгүй мэдээлэл татагдаагүй (оффлайн эсвэл сервер алдаа).');
+            messages.push('Дэлгэрэнгүй мэдээлэл татагдаагүй (сервер олдсонгүй эсвэл QR баазад байхгүй).');
         }
-        if (!isConnected) {
+        if (!isOnline) {
             level = 'warn';
             messages.push('Оффлайн горим: зөвхөн төхөөрөмж дээр хадгална. Дараа нь синк хийж болно.');
         }
@@ -187,48 +179,33 @@ export default function MainScreen({ selectedDate }) {
                 const year = selectedDate.getFullYear();
                 const month = selectedDate.getMonth() + 1;
                 const deviceId = Device.osInternalBuildId || 'UNKNOWN';
-                const fullRaw = `${data}^?${year}^?${month}^?${deviceId}^?CT$FS4`;
-
                 let item = null;
-                if (isConnected) {
+                if (isOnline) {
                     try {
-                        const response = await fetch('https://ctsystem.mn/api/details', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(fullRaw), // энэ endpoint чинь string JSON авдаг
-                        });
-                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                        const responseText = await response.text();
-                        let jsonData;
-                        try {
-                            jsonData = JSON.parse(responseText);
-                            if (typeof jsonData === 'string') jsonData = JSON.parse(jsonData);
-                        } catch {
-                            jsonData = null;
-                        }
-                        item = Array.isArray(jsonData) ? jsonData[0] : jsonData || null;
+                        item = await fetchAssetDetails({ raw: data, year, month, deviceId });
                     } catch (err) {
-                        showOnceAlert('Сервер алдаа', 'Дэлгэрэнгүй татаж чадсангүй. Хадгалж болно (оффлайн маягаар).');
+                        console.warn('fetchAssetDetails failed:', err);
+                        showOnceAlert('Сервер алдаа', 'Дэлгэрэнгүй татаж чадсангүй. Хадгалж болно.');
                     }
                 } else {
                     showOnceAlert('Оффлайн горим', 'Интернетгүй тул дэлгэрэнгүй авахгүй. Хадгалж болно.');
                 }
 
                 if (item) {
-                    parsed.assetName = item.name || '';
-                    parsed.unitType = item.unt || '';
-                    parsed.handler = item.lord || '';
+                    parsed.assetName = item.name || parsed.assetName;
+                    parsed.unitType = item.unt || parsed.unitType;
+                    parsed.handler = item.lord || parsed.handler;
                     parsed.date = normalizeDate(item.ognoo || parsed.date);
-                    parsed.account = item.dans || '';
+                    parsed.account = item.dans || parsed.account;
                     parsed.unitPrice = item.une != null ? String(item.une) : parsed.unitPrice;
-                } else if (!parsed.assetName) {
-                    parsed.assetName = '[оффлайн хадгалсан]';
+                } else if (isOnline && !parsed.assetName) {
+                    parsed.assetName = '[дэлгэрэнгүй олдсонгүй]';
                 }
             }
 
             // ---------- Урьдчилсан шалгалт ----------
             const hist = await loadNormalizedHistory();
-            const result = runPrecheck(parsed, selectedDate, hist, isConnected);
+            const result = runPrecheck(parsed, selectedDate, hist, isOnline);
             setPrecheck(result);
 
             if (result.level === 'error') {
@@ -270,15 +247,7 @@ export default function MainScreen({ selectedDate }) {
             const year = selectedDate.getFullYear();
             const month = selectedDate.getMonth() + 1;
 
-            const existing = await AsyncStorage.getItem('history') || '[]';
-            const parsedHistory = JSON.parse(existing);
-            const normalizedHistory = parsedHistory.map(it => {
-                if (!it.orgCode) {
-                    const rawParts = (it.raw || '').split('^?');
-                    return { ...it, orgCode: rawParts[5] || '' };
-                }
-                return it;
-            });
+            const normalizedHistory = await loadHistory();
 
             // байгууллагын кодын хамгаалалт
             const existingOrgCodes = new Set(normalizedHistory.map(it => it.orgCode).filter(Boolean));
@@ -308,23 +277,39 @@ export default function MainScreen({ selectedDate }) {
                 deviceId,
                 year,
                 month,
-                tag: 'CT$FS4',
                 createdAt: new Date().toISOString(),
             };
 
-            await AsyncStorage.setItem('history', JSON.stringify([newItem, ...normalizedHistory]));
+            let ctsWarning = null;
 
-            // Онлайнаар байвал серверт явуулна (asset endpoint string JSON авдаг хэвээр)
-            if (isConnected && infoText.assetName !== '[интернет шаардлагатай]' && infoText.assetName !== '[оффлайн хадгалсан]') {
-                const fullPayload = `${infoText.raw}^?${year}^?${month}^?${deviceId}^?CT$FS4`;
-                await fetch('https://ctsystem.mn/api/asset', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: `"${fullPayload}"`,
-                }).catch(() => {});
+            if (isOnline) {
+                try {
+                    const ctsResult = await sendAssetItem(newItem);
+                    console.log('CTS asset result:', ctsResult);
+                } catch (error) {
+                    ctsWarning = error?.message || 'ctsystem.mn руу илгээж чадсангүй';
+                    console.warn('CTS save failed:', ctsWarning);
+                }
             }
 
-            Alert.alert('Амжилттай', 'Мэдээллийг хадгаллаа.');
+            try {
+                await saveHistoryItem(newItem);
+            } catch (error) {
+                if (error?.code === 'DUPLICATE') {
+                    showOnceAlert('Давхцал', 'Энэ хөрөнгө аль хэдийн хадгалагдсан байна.');
+                    setLoading(false);
+                    return;
+                }
+                throw error;
+            }
+
+            const successMessage = ctsWarning
+                ? `Төхөөрөмж дээр хадгаллаа.\nCTS илгээлт амжилтгүй: ${ctsWarning}`
+                : isOnline
+                    ? 'Мэдээллийг ctsystem.mn руу илгээж, хадгаллаа.'
+                    : 'Мэдээллийг төхөөрөмж дээр хадгаллаа.';
+
+            Alert.alert(ctsWarning ? 'Хэсэгчлэн амжилттай' : 'Амжилттай', successMessage);
             setInfoText(null);
             setScanned(false);
             setPrecheck({ level: 'idle', messages: [] });
@@ -370,7 +355,7 @@ export default function MainScreen({ selectedDate }) {
                 )}
             </View>
 
-            {!isConnected && (
+            {!isOnline && (
                 <View style={styles.offlineBanner}>
                     <Text style={styles.offlineText}>Оффлайн горим: өгөгдөл төхөөрөмж дээр хадгалагдана.</Text>
                 </View>
