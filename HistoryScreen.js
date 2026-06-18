@@ -10,7 +10,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Device from 'expo-device';
 import { loadHistory, deleteHistoryItems, deleteAllHistory } from './lib/historyStorage';
-import { CTS_ASSET_TAG } from './lib/ctsystemApi';
+import { CTS_ASSET_TAG, sendAssetAll } from './lib/ctsystemApi';
 
 export default function HistoryScreen({ selectedDate, setTotalCount }) {
     const [history, setHistory] = useState([]);
@@ -294,18 +294,8 @@ export default function HistoryScreen({ selectedDate, setTotalCount }) {
         console.log(JSON.stringify(payload, null, 2));
 
         try {
-            const resp = await fetch("https://ctsystem.mn/api/assetAll", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-            });
-
-            if (!resp.ok) {
-                const raw = await resp.text().catch(() => "");
-                Alert.alert("Сервер алдаа", `HTTP ${resp.status}${raw ? "\n" + raw.slice(0, 500) : ""}`);
-            } else {
-                Alert.alert("Илгээлээ", `${payload.details.length} бичлэгийг амжилттай илгээлээ.`);
-            }
+            const result = await sendAssetAll(payload);
+            Alert.alert("Илгээлээ", `${result.count} бичлэгийг ctsystem.mn/CT$FS4 руу амжилттай илгээлээ.`);
         } catch (e) {
             Alert.alert("Алдаа", `Илгээх үед алдаа гарлаа:\n${String(e?.message || e)}`);
         }

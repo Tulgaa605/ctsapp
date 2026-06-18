@@ -71,10 +71,12 @@ app.delete('/api/history/all', async (_req, res) => {
   }
 });
 
+const CTS_PROXY_BASE = 'https://ctsystem.mn/CT$FS4';
+
 async function proxyCts(path, req, res) {
   try {
     const payload = typeof req.body === 'string' ? req.body : req.body;
-    const response = await fetch(`https://ctsystem.mn${path}`, {
+    const response = await fetch(`${CTS_PROXY_BASE}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -89,6 +91,7 @@ async function proxyCts(path, req, res) {
 
 app.post('/api/cts/asset', (req, res) => proxyCts('/api/asset', req, res));
 app.post('/api/cts/details', (req, res) => proxyCts('/api/details', req, res));
+app.post('/api/cts/assetAll', (req, res) => proxyCts('/api/assetAll', req, res));
 
 async function start() {
   await ensureSchema();

@@ -280,11 +280,13 @@ export default function MainScreen({ selectedDate }) {
                 createdAt: new Date().toISOString(),
             };
 
+            let ctsOk = false;
             let ctsWarning = null;
 
             if (isOnline) {
                 try {
                     const ctsResult = await sendAssetItem(newItem);
+                    ctsOk = true;
                     console.log('CTS asset result:', ctsResult);
                 } catch (error) {
                     ctsWarning = error?.message || 'ctsystem.mn руу илгээж чадсангүй';
@@ -292,8 +294,10 @@ export default function MainScreen({ selectedDate }) {
                 }
             }
 
+            let savedToDb = false;
             try {
-                await saveHistoryItem(newItem);
+                const saveResult = await saveHistoryItem(newItem);
+                savedToDb = saveResult.savedToDb;
             } catch (error) {
                 if (error?.code === 'DUPLICATE') {
                     showOnceAlert('Давхцал', 'Энэ хөрөнгө аль хэдийн хадгалагдсан байна.');
@@ -303,13 +307,18 @@ export default function MainScreen({ selectedDate }) {
                 throw error;
             }
 
-            const successMessage = ctsWarning
-                ? `Төхөөрөмж дээр хадгаллаа.\nCTS илгээлт амжилтгүй: ${ctsWarning}`
-                : isOnline
-                    ? 'Мэдээллийг ctsystem.mn руу илгээж, хадгаллаа.'
-                    : 'Мэдээллийг төхөөрөмж дээр хадгаллаа.';
+            const parts = [];
+            if (savedToDb) parts.push('Өгөгдлийн санд хадгаллаа');
+            else parts.push('Зөвхөн төхөөрөмж дээр түр хадгаллаа (API серверт холбогдож чадсангүй)');
 
-            Alert.alert(ctsWarning ? 'Хэсэгчлэн амжилттай' : 'Амжилттай', successMessage);
+            if (isOnline) {
+                if (ctsOk) parts.push('ctsystem.mn/CT$FS4 руу илгээлээ');
+                else parts.push(`ctsystem.mn илгээлт амжилтгүй: ${ctsWarning}`);
+            }
+
+            const allOk = savedToDb && (!isOnline || ctsOk);
+            const title = allOk ? 'Амжилттай' : 'Хэсэгчлэн амжилттай';
+            Alert.alert(title, parts.join('.\n'));
             setInfoText(null);
             setScanned(false);
             setPrecheck({ level: 'idle', messages: [] });
