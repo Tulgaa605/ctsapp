@@ -5,7 +5,10 @@
   "main": "index.js",
   "expo": {
     "install": {
-      "exclude": ["typescript", "@types/react"]
+      "exclude": [
+        "typescript",
+        "@types/react"
+      ]
     }
   },
   "scripts": {
@@ -28,6 +31,7 @@
     "@react-navigation/native": "^7.0.14",
     "@react-navigation/native-stack": "^7.2.0",
     "@react-navigation/stack": "^7.2.1",
+    "@types/react": "~19.0.10",
     "class-variance-authority": "^0.7.1",
     "expo": "^53.0.20",
     "expo-av": "~15.1.7",
@@ -53,8 +57,7 @@
     "react-native-web": "^0.20.0",
     "react-navigation": "^5.0.0",
     "tailwind-merge": "^3.1.0",
-    "typescript": "~5.8.3",
-    "@types/react": "~19.0.10"
+    "typescript": "~5.8.3"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
