@@ -5,12 +5,17 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "init-db": "node init-db.js"
+    "init-db": "node init-db.js",
+    "ssl:generate": "node generate-ssl.js",
+    "ssl:letsencrypt": "node obtain-letsencrypt.js",
+    "stop-port": "node stop-port.js"
   },
   "dependencies": {
+    "acme-client": "^5.4.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "mysql2": "^3.14.0"
+    "mysql2": "^3.14.0",
+    "selfsigned": "^2.4.1"
   }
 }

@@ -33,6 +33,8 @@ yarn-error.*
 .env
 .env*.local
 server/.env
+server/ssl/*.pem
+server/data/
 
 # typescript
 *.tsbuildinfo

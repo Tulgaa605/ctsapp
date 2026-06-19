@@ -1,5 +1,9 @@
 const express = require('express');
 const cors = require('cors');
+const https = require('https');
+const http = require('http');
+const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const {
@@ -11,7 +15,7 @@ const {
 } = require('./db');
 
 const app = express();
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 8081);
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
@@ -93,10 +97,37 @@ app.post('/api/cts/asset', (req, res) => proxyCts('/api/asset', req, res));
 app.post('/api/cts/details', (req, res) => proxyCts('/api/details', req, res));
 app.post('/api/cts/assetAll', (req, res) => proxyCts('/api/assetAll', req, res));
 
+const webBuildPath = path.join(__dirname, '..', 'dist');
+if (fs.existsSync(webBuildPath)) {
+  app.use(express.static(webBuildPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path === '/health') return next();
+    res.sendFile(path.join(webBuildPath, 'index.html'));
+  });
+}
+
+const { loadHttpsCredentials } = require('./ssl-loader');
+
 async function start() {
   await ensureSchema();
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`CTS API running on http://0.0.0.0:${PORT}`);
+  const publicHost = process.env.SSL_DOMAIN || process.env.PUBLIC_HOST || '64.119.30.250';
+  const useHttp = process.env.SSL_DISABLED === '1' || process.env.SSL_DISABLED === 'true';
+
+  if (useHttp) {
+    http.createServer(app).listen(PORT, '0.0.0.0', () => {
+      console.log(`CTS API running on http://${publicHost}:${PORT}`);
+      console.log('HTTP горим — анхааруулгагүй ачаална (хаягийн мөрөнд "Not secure" байж болно)');
+    });
+    return;
+  }
+
+  const { key, cert, source } = loadHttpsCredentials();
+
+  https.createServer({ key, cert }, app).listen(PORT, '0.0.0.0', () => {
+    console.log(`CTS API running on https://${publicHost}:${PORT} (SSL: ${source})`);
+    if (source === 'self-signed') {
+      console.warn('WARNING: Self-signed — "Not private" гарна. npm run ssl:letsencrypt эсвэл SSL_DISABLED=1');
+    }
   });
 }
 
