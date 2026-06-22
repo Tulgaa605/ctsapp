@@ -12,11 +12,11 @@
     }
   },
   "scripts": {
-    "start": "expo start --host 0.0.0.0",
-    "start:web": "expo start --web --host 0.0.0.0 --port 8081",
-    "start:web:dev": "expo start --web --host 0.0.0.0 --port 8082",
+    "start": "expo start --host lan",
+    "start:web": "expo start --web --host lan --port 8082",
+    "start:web:dev": "expo start --web --host lan --port 8082",
     "build:web": "expo export -p web",
-    "start:vps": "npm run server:stop && npm run build:web && npm run ssl:generate && npm run db:init && npm --prefix server start",
+    "start:vps": "npm run server:stop && npm run build:web && npm run ssl:letsencrypt && npm run db:init && npm --prefix server start",
     "db:init": "npm --prefix server run init-db",
     "server": "npm --prefix server start",
     "server:stop": "node server/stop-port.js",
@@ -25,7 +25,7 @@
     "ssl:letsencrypt": "npm --prefix server run ssl:letsencrypt",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web --host 0.0.0.0 --port 8081"
+    "web": "expo start --web --host lan --port 8082"
   },
   "dependencies": {
     "@expo/metro-runtime": "~5.0.5",
