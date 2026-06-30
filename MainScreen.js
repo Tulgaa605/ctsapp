@@ -10,6 +10,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { useNetInfo } from '@react-native-community/netinfo';
 import { loadHistory, saveHistoryItem } from './lib/historyStorage';
 import { fetchAssetDetails, sendAssetItem, isDeviceOnline } from './lib/ctsystemApi';
+import CameraSection from './components/CameraSection';
 
 const ALERT_COOLDOWN_MS = 1200;
 const RESCAN_DELAY_MS = 1000; // давхар уншилтыг багасгахад тусална
@@ -19,13 +20,12 @@ export default function MainScreen({ selectedDate }) {
     const [loading, setLoading] = useState(false);
     const [permission, requestPermission] = useCameraPermissions();
     const [scanned, setScanned] = useState(false);
+    const [precheck, setPrecheck] = useState({ level: 'idle', messages: [] });
     const scanLocked = useRef(false);
     const alertStampRef = useRef(0);
     const isFocused = useIsFocused();
     const { isConnected } = useNetInfo();
     const isOnline = isDeviceOnline(isConnected);
-
-    const [precheck, setPrecheck] = useState({ level: 'idle', messages: [] }); // 'idle' | 'ok' | 'warn' | 'error'
 
     // ---- Давхар тайм-аут цэвэрлэх төвлөрсөн unlock ----
     const rescanTimerRef = useRef(null);
@@ -52,8 +52,13 @@ export default function MainScreen({ selectedDate }) {
     // -------- Туслах функцууд --------
     const showOnceAlert = (title, message, onOk) => {
         const now = Date.now();
-        if (now - alertStampRef.current < ALERT_COOLDOWN_MS) return; // throttle
+        if (now - alertStampRef.current < ALERT_COOLDOWN_MS) return;
         alertStampRef.current = now;
+        if (Platform.OS === 'web') {
+            window.alert(`${title}\n\n${message}`);
+            onOk?.();
+            return;
+        }
         Alert.alert(title, message, [{ text: 'OK', onPress: onOk || (() => {}) }]);
     };
 
@@ -137,9 +142,14 @@ export default function MainScreen({ selectedDate }) {
     };
 
     // -------- QR уншилт --------
-    const handleBarCodeScanned = async ({ data }) => {
+    const handleBarCodeScanned = async (result) => {
         if (!isFocused) return;
         if (scanned || scanLocked.current) return;
+
+        const data = typeof result === 'string'
+            ? result
+            : (result?.data ?? result?.nativeEvent?.data);
+        if (!data) return;
 
         // lock & vibrate
         scanLocked.current = true;
@@ -178,9 +188,10 @@ export default function MainScreen({ selectedDate }) {
                 // 7 талбар → зөвхөн онлайнаар details авах
                 const year = selectedDate.getFullYear();
                 const month = selectedDate.getMonth() + 1;
-                const deviceId = Device.osInternalBuildId || 'UNKNOWN';
+                const deviceId = Device.osInternalBuildId || 'WEB';
                 let item = null;
                 if (isOnline) {
+                    setInfoText({ ...parsed, assetName: 'Дэлгэрэнгүй татаж байна...' });
                     try {
                         item = await fetchAssetDetails({ raw: data, year, month, deviceId });
                     } catch (err) {
@@ -309,7 +320,7 @@ export default function MainScreen({ selectedDate }) {
 
             const parts = [];
             if (savedToDb) parts.push('Өгөгдлийн санд хадгаллаа');
-            else parts.push('Зөвхөн төхөөрөмж дээр түр хадгаллаа (API серверт холбогдож чадсангүй)');
+            else parts.push('Серверт холбогдож чадсангүй — зөвхөн төхөөрөмж дээр түр хадгаллаа');
 
             if (isOnline) {
                 if (ctsOk) parts.push('ctsystem.mn/CT$FS4 руу илгээлээ');
@@ -318,51 +329,77 @@ export default function MainScreen({ selectedDate }) {
 
             const allOk = savedToDb && (!isOnline || ctsOk);
             const title = allOk ? 'Амжилттай' : 'Хэсэгчлэн амжилттай';
-            Alert.alert(title, parts.join('.\n'));
+            const msg = parts.join('.\n');
+            if (Platform.OS === 'web') {
+                window.alert(`${title}\n${msg}`);
+            } else {
+                Alert.alert(title, msg);
+            }
             setInfoText(null);
             setScanned(false);
             setPrecheck({ level: 'idle', messages: [] });
         } catch (e) {
-            showOnceAlert('Алдаа', 'Мэдээллийг хадгалах үед алдаа гарлаа.');
+            const message = e?.message || 'Мэдээллийг хадгалах үед алдаа гарлаа.';
+            showOnceAlert('Алдаа', message);
         } finally {
             setLoading(false);
         }
     };
 
-    if (!permission) return <View />;
-    if (!permission.granted) {
-        return (
-            <View style={styles.centerText}>
-                <Text style={{ textAlign: 'center', marginBottom: 10 }}>Камер ашиглах зөвшөөрөл олгоно уу.</Text>
-                <Button onPress={requestPermission} title="Зөвшөөрөл олгох" />
-            </View>
-        );
+    const cameraActive = Boolean(permission?.granted && isFocused && !scanned);
+
+    const handleRescan = () => {
+        setInfoText(null);
+        setPrecheck({ level: 'idle', messages: [] });
+        unlockScanner(0);
+    };
+
+    if (Platform.OS !== 'web') {
+        if (!permission) return <View />;
+        if (!permission.granted) {
+            return (
+                <View style={styles.centerText}>
+                    <Text style={{ textAlign: 'center', marginBottom: 10 }}>Камер ашиглах зөвшөөрөл олгоно уу.</Text>
+                    <Button onPress={requestPermission} title="Зөвшөөрөл олгох" />
+                </View>
+            );
+        }
     }
 
     return (
         <ScrollView contentContainerStyle={styles.container}>
-            <View style={styles.cameraContainer}>
-                {isFocused && (
-                    <CameraView
-                        onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-                        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                        style={StyleSheet.absoluteFillObject}
+            {Platform.OS === 'web' ? (
+                <View style={styles.webCameraWrap}>
+                    <CameraSection
+                        onScan={handleBarCodeScanned}
+                        scanPaused={scanned || !isFocused}
+                        onRescanRequest={handleRescan}
                     />
-                )}
-                {scanned && (
-                    <TouchableOpacity
-                        style={styles.rescanButton}
-                        onPress={() => {
-                            setInfoText(null);
-                            setPrecheck({ level: 'idle', messages: [] });
-                            unlockScanner(0); // шууд дахин уншуулна
-                        }}
-                    >
-                        <MaterialCommunityIcons name="qrcode-scan" size={40} color="#fff" />
-                        <Text style={styles.rescanButtonText}>Дахин унших</Text>
-                    </TouchableOpacity>
-                )}
-            </View>
+                </View>
+            ) : (
+                <View style={styles.cameraContainer}>
+                    {cameraActive && (
+                        <CameraView
+                            onBarcodeScanned={handleBarCodeScanned}
+                            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                            facing="back"
+                            style={StyleSheet.absoluteFillObject}
+                        />
+                    )}
+                    {!cameraActive && (
+                        <View style={styles.cameraPlaceholder}>
+                            <MaterialCommunityIcons name="camera-off" size={36} color="#fff" />
+                            <Text style={styles.cameraPlaceholderText}>Камер ачааллаж байна...</Text>
+                        </View>
+                    )}
+                    {scanned && (
+                        <TouchableOpacity style={styles.rescanButton} onPress={handleRescan}>
+                            <MaterialCommunityIcons name="qrcode-scan" size={40} color="#fff" />
+                            <Text style={styles.rescanButtonText}>Дахин унших</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+            )}
 
             {!isOnline && (
                 <View style={styles.offlineBanner}>
@@ -420,7 +457,10 @@ export default function MainScreen({ selectedDate }) {
 
 const styles = StyleSheet.create({
     container: { flexGrow: 1, alignItems: 'center', padding: 20, backgroundColor: '#f0f2f5' },
-    cameraContainer: { width: 250, height: 250, overflow: 'hidden', borderRadius: 10, borderWidth: 3, borderColor: '#5dade2', marginBottom: 30, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
+    webCameraWrap: { width: '100%', alignItems: 'center' },
+    cameraContainer: { width: 250, height: 250, overflow: 'hidden', borderRadius: 10, borderWidth: 3, borderColor: '#5dade2', marginBottom: 30, backgroundColor: '#000' },
+    cameraPlaceholder: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', alignItems: 'center', padding: 16 },
+    cameraPlaceholderText: { color: '#fff', textAlign: 'center', marginTop: 8, fontSize: 13 },
     saveButton: { backgroundColor: '#34d399', paddingVertical: 15, borderRadius: 10, alignItems: 'center', justifyContent: 'center', width: '100%', marginBottom: 20 },
     buttonText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
     rescanButton: { backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', width: '100%', height: '100%' },

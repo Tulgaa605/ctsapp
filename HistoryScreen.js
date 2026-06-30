@@ -12,6 +12,26 @@ import * as Device from 'expo-device';
 import { loadHistory, deleteHistoryItems, deleteAllHistory } from './lib/historyStorage';
 import { CTS_ASSET_TAG, sendAssetAll } from './lib/ctsystemApi';
 
+const confirmAction = (title, message) => {
+    if (Platform.OS === 'web') {
+        return Promise.resolve(window.confirm(`${title}\n\n${message}`));
+    }
+    return new Promise((resolve) => {
+        Alert.alert(title, message, [
+            { text: 'Болих', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Устгах', style: 'destructive', onPress: () => resolve(true) },
+        ]);
+    });
+};
+
+const showMessage = (title, message) => {
+    if (Platform.OS === 'web') {
+        window.alert(`${title}\n${message}`);
+        return;
+    }
+    Alert.alert(title, message);
+};
+
 export default function HistoryScreen({ selectedDate, setTotalCount }) {
     const [history, setHistory] = useState([]);
     const [listSections, setListSections] = useState([]);
@@ -84,47 +104,45 @@ export default function HistoryScreen({ selectedDate, setTotalCount }) {
     }, [monthFiltered.length, setTotalCount]);
 
     const handleSelect = (itemId) => {
+        const id = String(itemId);
         const ns = new Set(selectedItems);
-        ns.has(itemId) ? ns.delete(itemId) : ns.add(itemId);
+        if (ns.has(id)) ns.delete(id);
+        else ns.add(id);
         setSelectedItems(ns);
     };
 
     const handleDeleteSelected = async () => {
         if (selectedItems.size === 0) return;
-        Alert.alert(
-            "Устгах уу?",
-            `${selectedItems.size} мэдээлэл устгахдаа итгэлтэй байна уу?`,
-            [
-                { text: "Болих", style: "cancel" },
-                {
-                    text: "Устгах", style: "destructive",
-                    onPress: async () => {
-                        const newHistory = await deleteHistoryItems([...selectedItems]);
-                        setHistory(newHistory);
-                        setSelectedItems(new Set());
-                    }
-                }
-            ]
+        const ok = await confirmAction(
+            'Устгах уу?',
+            `${selectedItems.size} мэдээлэл устгахдаа итгэлтэй байна уу?`
         );
+        if (!ok) return;
+        try {
+            await deleteHistoryItems([...selectedItems]);
+            await fetchHistory();
+            setSelectedItems(new Set());
+            showMessage('Амжилттай', 'Сонгосон бичлэгүүдийг устгалаа.');
+        } catch (error) {
+            showMessage('Алдаа', 'Устгах үед алдаа гарлаа.');
+        }
     };
 
     const handleDeleteAll = async () => {
-        Alert.alert(
-            "Анхаар!",
-            "Та бүх түүхийг устгахдаа итгэлтэй байна уу? Энэ үйлдлийг буцаах боломжгүй.",
-            [
-                { text: "Болих", style: "cancel" },
-                {
-                    text: "Бүгдийг устгах", style: "destructive",
-                    onPress: async () => {
-                        await deleteAllHistory();
-                        setHistory([]);
-                        setSelectedItems(new Set());
-                        Alert.alert("Амжилттай", "Бүх түүхийг устгалаа.");
-                    }
-                }
-            ]
+        const ok = await confirmAction(
+            'Анхаар!',
+            'Та бүх түүхийг устгахдаа итгэлтэй байна уу? Энэ үйлдлийг буцаах боломжгүй.'
         );
+        if (!ok) return;
+        try {
+            await deleteAllHistory();
+            await fetchHistory();
+            setHistory([]);
+            setSelectedItems(new Set());
+            showMessage('Амжилттай', 'Бүх түүхийг устгалаа.');
+        } catch (error) {
+            showMessage('Алдаа', 'Устгах үед алдаа гарлаа.');
+        }
     };
 // 1) Helpers (файлын дээд талд нэг удаа байрлуул)
     const looksLikeDownloads = (uri) => {
@@ -353,6 +371,7 @@ export default function HistoryScreen({ selectedDate, setTotalCount }) {
                         </TouchableOpacity>
                         <TouchableOpacity onPress={handleDeleteAll} style={styles.deleteAllButton}>
                             <MaterialCommunityIcons name="delete-sweep" size={24} color="#ef4444" />
+                            <Text style={styles.deleteAllText}>Устгах</Text>
                         </TouchableOpacity>
                     </View>
                 )}
@@ -403,22 +422,20 @@ export default function HistoryScreen({ selectedDate, setTotalCount }) {
 }
 
 const ListItem = React.memo(({ item, isSelectionMode, selectedItems, onSelect, onLongPress }) => {
-    const isSelected = selectedItems.has(item.id);
+    const isSelected = selectedItems.has(String(item.id));
     return (
         <TouchableOpacity
             style={[styles.listItem, isSelected && styles.listItemSeletected]}
-            onLongPress={() => !isSelectionMode && onLongPress(item)}
-            onPress={() => { if (isSelectionMode) onSelect(item.id); }}
+            onLongPress={() => onLongPress(item)}
+            onPress={() => onSelect(item.id)}
         >
             <View style={styles.listItemContent}>
-                {isSelectionMode && (
-                    <MaterialCommunityIcons
-                        name={isSelected ? 'checkbox-marked-circle' : 'checkbox-blank-circle-outline'}
-                        size={24}
-                        color={isSelected ? '#3b82f6' : '#888'}
-                        style={{ marginRight: 15 }}
-                    />
-                )}
+                <MaterialCommunityIcons
+                    name={isSelected ? 'checkbox-marked-circle' : 'checkbox-blank-circle-outline'}
+                    size={24}
+                    color={isSelected ? '#3b82f6' : '#888'}
+                    style={{ marginRight: 15 }}
+                />
                 <View style={{ flex: 1 }}>
                     <Text style={styles.itemText}>
                         {item.handler ? `Эд хариуцагч: ${item.handler}\n` : ''}
@@ -449,7 +466,8 @@ const styles = StyleSheet.create({
     controlsContainer: { padding: 10, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#ddd' },
     searchRow: { flexDirection: 'row', alignItems: 'center' },
     searchInput: { flex: 1, backgroundColor: '#f0f2f5', height: 40, borderRadius: 8, paddingHorizontal: 15, fontSize: 16 },
-    deleteAllButton: { padding: 8, marginLeft: 8 },
+    deleteAllButton: { padding: 8, marginLeft: 8, alignItems: 'center' },
+    deleteAllText: { fontSize: 10, color: '#ef4444', marginTop: 2 },
     selectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 5, height: 40 },
     headerButton: { fontSize: 16, color: '#3b82f6', fontWeight: '500' },
     title: { fontSize: 16, fontWeight: 'bold' },

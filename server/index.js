@@ -18,6 +18,50 @@ const app = express();
 const PORT = Number(process.env.PORT || 8081);
 
 app.use(cors());
+
+/** CTS proxy — QR string илгээлт (JSON string эсвэл plain text) */
+const ctsTextBody = express.text({ type: '*/*', limit: '2mb' });
+const ctsJsonBody = express.json({ limit: '2mb' });
+
+const CTS_PROXY_BASE = 'https://ctsystem.mn';
+
+function normalizeCtsForwardBody(body) {
+  if (body == null) return '""';
+  if (typeof body === 'object') return JSON.stringify(body);
+  const trimmed = String(body).trim();
+  if (!trimmed) return '""';
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return trimmed;
+  if (trimmed.startsWith('"')) {
+    try {
+      JSON.parse(trimmed);
+      return trimmed;
+    } catch {
+      return JSON.stringify(trimmed);
+    }
+  }
+  return JSON.stringify(trimmed);
+}
+
+async function proxyCts(path, req, res) {
+  try {
+    const forwardBody = normalizeCtsForwardBody(req.body);
+    const response = await fetch(`${CTS_PROXY_BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: forwardBody,
+    });
+    const text = await response.text();
+    res.status(response.status).send(text);
+  } catch (error) {
+    console.error(`CTS proxy ${path}`, error);
+    res.status(502).json({ error: 'CTS proxy failed' });
+  }
+}
+
+app.post('/api/cts/asset', ctsTextBody, (req, res) => proxyCts('/api/asset', req, res));
+app.post('/api/cts/details', ctsTextBody, (req, res) => proxyCts('/api/details', req, res));
+app.post('/api/cts/assetAll', ctsJsonBody, (req, res) => proxyCts('/api/assetAll', req, res));
+
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/health', (_req, res) => {
@@ -39,11 +83,13 @@ app.get('/api/history', async (req, res) => {
 app.post('/api/history', async (req, res) => {
   try {
     const item = req.body;
+    console.log('POST /api/history', item?.assetCode, item?.serialNumber);
     if (!item?.assetCode || !item?.serialNumber || !item?.raw) {
       return res.status(400).json({ error: 'assetCode, serialNumber, raw are required' });
     }
 
     const saved = await createHistoryItem(item);
+    console.log('POST /api/history saved id:', saved.id);
     res.status(201).json(saved);
   } catch (error) {
     if (error?.code === 'ER_DUP_ENTRY') {
@@ -74,28 +120,6 @@ app.delete('/api/history/all', async (_req, res) => {
     res.status(500).json({ error: 'Failed to delete all history' });
   }
 });
-
-const CTS_PROXY_BASE = 'https://ctsystem.mn/CT$FS4';
-
-async function proxyCts(path, req, res) {
-  try {
-    const payload = typeof req.body === 'string' ? req.body : req.body;
-    const response = await fetch(`${CTS_PROXY_BASE}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const text = await response.text();
-    res.status(response.status).send(text);
-  } catch (error) {
-    console.error(`CTS proxy ${path}`, error);
-    res.status(502).json({ error: 'CTS proxy failed' });
-  }
-}
-
-app.post('/api/cts/asset', (req, res) => proxyCts('/api/asset', req, res));
-app.post('/api/cts/details', (req, res) => proxyCts('/api/details', req, res));
-app.post('/api/cts/assetAll', (req, res) => proxyCts('/api/assetAll', req, res));
 
 const webBuildPath = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(webBuildPath)) {
